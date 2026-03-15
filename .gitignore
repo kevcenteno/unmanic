@@ -19,3 +19,16 @@ venv/**
 build/**
 dist/**
 unmanic.egg-info/**
+
+# Node.js
+node_modules
+frontend/dist
+frontend/node_modules
+
+# Go / Backend
+backend/muxmill.db*
+backend/backend
+backend/backend.exe
+backend/muxmill
+backend/muxmill.exe
+backend/frontend_dist
