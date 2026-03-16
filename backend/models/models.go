@@ -38,6 +38,7 @@ type Task struct {
 	ID                uint           `gorm:"primaryKey" json:"id"`
 	Abspath           string         `gorm:"unique;not null" json:"abspath"`
 	CachePath         string         `json:"cache_path"`
+	OriginalSize      int64          `json:"original_size"`
 	Priority          int            `gorm:"index:idx_lib_status_priority,priority:desc;not null;default:0" json:"priority"`
 	Type              string         `gorm:"not null" json:"type"`
 	LibraryID         uint           `gorm:"index:idx_lib_status_priority" json:"library_id"`
@@ -59,10 +60,13 @@ type CompletedTask struct {
 	ID                uint   `gorm:"primaryKey" json:"id"`
 	TaskLabel         string `gorm:"not null" json:"task_label"`
 	Abspath           string `gorm:"not null" json:"abspath"`
+	OriginalSize      int64  `json:"original_size"`
+	NewSize           int64  `json:"new_size"`
 	TaskSuccess       bool   `gorm:"not null" json:"task_success"`
 	StartTime         time.Time `json:"start_time"`
 	FinishTime        time.Time `json:"finish_time"`
 	ProcessedByWorker string `json:"processed_by_worker"`
+	Log               string `gorm:"type:text" json:"log"`
 	CreatedAt         time.Time `json:"created_at"`
 	UpdatedAt         time.Time `json:"updated_at"`
 	DeletedAt         gorm.DeletedAt `gorm:"index" json:"-"`
@@ -114,12 +118,15 @@ type Profile struct {
 }
 
 type Pipeline struct {
-	ID        uint      `gorm:"primaryKey" json:"id"`
-	Name      string    `gorm:"unique;not null" json:"name"`
-	Profiles  []Profile `gorm:"foreignKey:PipelineID" json:"profiles"`
-	CreatedAt time.Time `json:"created_at"`
-	UpdatedAt time.Time `json:"updated_at"`
-	DeletedAt gorm.DeletedAt `gorm:"index" json:"-"`
+	ID                 uint      `gorm:"primaryKey" json:"id"`
+	Name               string    `gorm:"unique;not null" json:"name"`
+	RejectLargerFiles  bool      `gorm:"not null;default:true" json:"reject_larger_files"`
+	CachePath          string    `json:"cache_path"`
+	RelocatePath       string    `json:"relocate_path"`
+	Profiles           []Profile `gorm:"foreignKey:PipelineID" json:"profiles"`
+	CreatedAt          time.Time `json:"created_at"`
+	UpdatedAt          time.Time `json:"updated_at"`
+	DeletedAt          gorm.DeletedAt `gorm:"index" json:"-"`
 }
 
 type FileMetadataCache struct {

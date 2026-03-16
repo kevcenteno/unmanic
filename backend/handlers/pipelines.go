@@ -87,6 +87,9 @@ func UpdatePipeline(c *gin.Context) {
 
 	// Update pipeline fields
 	existingPipeline.Name = input.Name
+	existingPipeline.RejectLargerFiles = input.RejectLargerFiles
+	existingPipeline.CachePath = input.CachePath
+	existingPipeline.RelocatePath = input.RelocatePath
 
 	err = db.DB.Transaction(func(tx *gorm.DB) error {
 		// Save pipeline

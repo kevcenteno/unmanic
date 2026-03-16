@@ -2,13 +2,18 @@ import React, { useEffect, useState, useCallback } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import { api } from '../context/AuthContext'
 import { useWebSocket } from '../context/WebSocketContext'
-import { Search, Filter, Trash, RefreshCcw, ChevronLeft, ChevronRight, CheckCircle, XCircle } from 'lucide-react'
+import { Search, Filter, Trash, RefreshCcw, ChevronLeft, ChevronRight, CheckCircle, XCircle, Info, Copy, Clock, HardDrive, FileText } from 'lucide-react'
 
 interface Task {
   id: number
   abspath: string
   status: string
   priority: number
+  original_size: number
+  log?: string
+  start_time?: string
+  finish_time?: string
+  processed_by_worker?: string
 }
 
 interface CompletedTask {
@@ -17,12 +22,146 @@ interface CompletedTask {
   abspath: string
   task_success: boolean
   finish_time: string
+  start_time: string
+  original_size: number
+  new_size: number
+  log: string
+  processed_by_worker: string
 }
 
 interface PaginatedResponse<T> {
   recordsTotal: number
   recordsFiltered: number
   results: T[]
+}
+
+const formatBytes = (bytes: number) => {
+  if (!bytes) return '0 MB'
+  return (bytes / (1024 * 1024)).toFixed(2) + ' MB'
+}
+
+const formatDate = (dateStr?: string, fallback: string = 'N/A') => {
+  if (!dateStr) return fallback
+  const date = new Date(dateStr)
+  // Check if date is Go's zero value (0001-01-01...)
+  if (date.getFullYear() <= 1) return fallback
+  return date.toLocaleString()
+}
+
+const TaskDetailsModal: React.FC<{ task: any; onClose: () => void }> = ({ task, onClose }) => {
+  const [activeTab, setActiveTab] = useState<'info' | 'log'>('info')
+  
+  const copyPath = () => {
+    navigator.clipboard.writeText(task.abspath)
+  }
+
+  const savings = task.original_size && task.new_size 
+    ? ((1 - (task.new_size / task.original_size)) * 100).toFixed(1)
+    : null
+
+  return (
+    <>
+      <div className="modal modal-blur fade show d-block" tabIndex={-1} role="dialog">
+        <div className="modal-dialog modal-lg modal-dialog-centered" role="document">
+          <div className="modal-content">
+            <div className="modal-header">
+              <h5 className="modal-title text-truncate" title={task.abspath}>
+                Task Details
+              </h5>
+              <button type="button" className="btn-close" onClick={onClose} />
+            </div>
+            
+            <div className="card-header border-0">
+              <ul className="nav nav-tabs card-header-tabs">
+                <li className="nav-item">
+                  <button className={`nav-link ${activeTab === 'info' ? 'active' : ''}`} onClick={() => setActiveTab('info')}>
+                    <Info size={16} className="me-2" /> General
+                  </button>
+                </li>
+                <li className="nav-item">
+                  <button className={`nav-link ${activeTab === 'log' ? 'active' : ''}`} onClick={() => setActiveTab('log')}>
+                    <FileText size={16} className="me-2" /> Processing Log
+                  </button>
+                </li>
+              </ul>
+            </div>
+
+            <div className="modal-body scrollable" style={{ maxHeight: '70vh' }}>
+              {activeTab === 'info' ? (
+                <div className="row g-3">
+                  <div className="col-12">
+                    <label className="form-label">File Path</label>
+                    <div className="input-group">
+                      <input type="text" className="form-control" value={task.abspath} readOnly />
+                      <button className="btn btn-outline-secondary btn-icon" onClick={copyPath} title="Copy Path">
+                        <Copy size={16} />
+                      </button>
+                    </div>
+                  </div>
+
+                  <div className="col-md-6">
+                    <div className="card bg-light border-0">
+                      <div className="card-body p-3">
+                        <div className="d-flex align-items-center mb-2">
+                          <Clock size={16} className="text-muted me-2" />
+                          <div className="text-muted small">Timing</div>
+                        </div>
+                        <div className="small"><strong>Started:</strong> {formatDate(task.start_time)}</div>
+                        <div className="small"><strong>Finished:</strong> {formatDate(task.finish_time, 'Pending')}</div>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="col-md-6">
+                    <div className="card bg-light border-0">
+                      <div className="card-body p-3">
+                        <div className="d-flex align-items-center mb-2">
+                          <HardDrive size={16} className="text-muted me-2" />
+                          <div className="text-muted small">Storage</div>
+                        </div>
+                        <div className="small"><strong>Original:</strong> {formatBytes(task.original_size)}</div>
+                        {task.new_size > 0 && (
+                          <>
+                            <div className="small"><strong>New Size:</strong> {formatBytes(task.new_size)}</div>
+                            <div className="small text-success"><strong>Savings:</strong> {savings}%</div>
+                          </>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="col-12">
+                    <div className="datagrid">
+                      <div className="datagrid-item">
+                        <div className="datagrid-title">Status</div>
+                        <div className="datagrid-content">
+                          <span className={`badge ${task.task_success !== undefined ? (task.task_success ? 'bg-success-lt' : 'bg-danger-lt') : 'bg-blue-lt'}`}>
+                            {task.status || (task.task_success ? 'Success' : 'Failed')}
+                          </span>
+                        </div>
+                      </div>
+                      <div className="datagrid-item">
+                        <div className="datagrid-title">Worker</div>
+                        <div className="datagrid-content">{task.processed_by_worker || 'N/A'}</div>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              ) : (
+                <div className="bg-dark text-light p-3 rounded font-monospace small" style={{ whiteSpace: 'pre-wrap', minHeight: '200px' }}>
+                  {task.log || 'No log data available for this task.'}
+                </div>
+              )}
+            </div>
+            <div className="modal-footer">
+              <button className="btn btn-primary ms-auto" onClick={onClose}>Close</button>
+            </div>
+          </div>
+        </div>
+      </div>
+      <div className="modal-backdrop fade show" />
+    </>
+  )
 }
 
 const Tasks: React.FC = () => {
@@ -35,6 +174,7 @@ const Tasks: React.FC = () => {
   
   const [loading, setLoading] = useState<boolean>(true)
   const [error, setError] = useState<string | null>(null)
+  const [selectedTask, setSelectedTask] = useState<any | null>(null)
 
   // Pagination & Filtering state
   const [page, setPage] = useState(1)
@@ -43,8 +183,10 @@ const Tasks: React.FC = () => {
   const [search, setSearch] = useState('')
   const [statusFilter, setStatusFilter] = useState('')
 
-  const fetchTasks = useCallback(async () => {
-    setLoading(true)
+  const fetchTasks = useCallback(async (isBackground = false) => {
+    if (!isBackground) {
+      setLoading(true)
+    }
     setError(null)
     const start = (page - 1) * pageSize
     const endpoint = activeTab === 'pending' ? '/tasks/pending' : '/tasks/history'
@@ -77,7 +219,7 @@ const Tasks: React.FC = () => {
   // Refresh data when WebSocket receives a relevant update
   useEffect(() => {
     if (lastEvent?.type === 'TASKS_UPDATE' || lastEvent?.type === 'FULL_STATUS') {
-      fetchTasks()
+      fetchTasks(true)
     }
   }, [lastEvent?.type, fetchTasks])
 
@@ -88,7 +230,8 @@ const Tasks: React.FC = () => {
     setStatusFilter('')
   }
 
-  const handleCancelPending = async (id: number) => {
+  const handleCancelPending = async (e: React.MouseEvent, id: number) => {
+    e.stopPropagation()
     if (!window.confirm('Cancel this pending task?')) return
     try {
       await api.delete(`/tasks/pending/${id}`)
@@ -195,6 +338,7 @@ const Tasks: React.FC = () => {
               {activeTab === 'pending' ? (
                 <tr>
                   <th>File Path</th>
+                  <th className="w-1">Size</th>
                   <th className="w-1">Priority</th>
                   <th className="w-1">Status</th>
                   <th className="w-1"></th>
@@ -202,6 +346,9 @@ const Tasks: React.FC = () => {
               ) : (
                 <tr>
                   <th>Task Label</th>
+                  <th className="w-1 text-nowrap">Original Size</th>
+                  <th className="w-1 text-nowrap">New Size</th>
+                  <th className="w-1 text-nowrap">Savings</th>
                   <th className="w-1 text-center">Result</th>
                   <th className="w-1 text-nowrap">Finished At</th>
                 </tr>
@@ -210,17 +357,18 @@ const Tasks: React.FC = () => {
             <tbody>
               {loading ? (
                 <tr>
-                  <td colSpan={4} className="text-center py-5">
+                  <td colSpan={6} className="text-center py-5">
                     <div className="spinner-border text-primary" role="status"></div>
                   </td>
                 </tr>
               ) : activeTab === 'pending' ? (
                 pending.length === 0 ? (
-                  <tr><td colSpan={4} className="text-center py-4 text-muted">No pending tasks found.</td></tr>
+                  <tr><td colSpan={5} className="text-center py-4 text-muted">No pending tasks found.</td></tr>
                 ) : (
                   pending.map((t) => (
-                    <tr key={t.id}>
+                    <tr key={t.id} onClick={() => setSelectedTask(t)} className="cursor-pointer">
                       <td className="text-muted small"><code>{t.abspath}</code></td>
+                      <td className="text-nowrap">{formatBytes(t.original_size)}</td>
                       <td>{t.priority}</td>
                       <td>
                         <span className={`badge ${t.status === 'pending' ? 'bg-blue-lt' : 'bg-warning-lt'}`}>
@@ -228,7 +376,7 @@ const Tasks: React.FC = () => {
                         </span>
                       </td>
                       <td>
-                        <button className="btn btn-icon btn-ghost-danger btn-sm" onClick={() => handleCancelPending(t.id)}>
+                        <button className="btn btn-icon btn-ghost-danger btn-sm" onClick={(e) => handleCancelPending(e, t.id)}>
                           <Trash size={16} />
                         </button>
                       </td>
@@ -237,23 +385,35 @@ const Tasks: React.FC = () => {
                 )
               ) : (
                 history.length === 0 ? (
-                  <tr><td colSpan={3} className="text-center py-4 text-muted">No history found.</td></tr>
+                  <tr><td colSpan={6} className="text-center py-4 text-muted">No history found.</td></tr>
                 ) : (
-                  history.map((h) => (
-                    <tr key={h.id}>
-                      <td>{h.task_label}</td>
-                      <td className="text-center">
-                        {h.task_success ? (
-                          <span className="badge bg-success-lt text-success">Success</span>
-                        ) : (
-                          <span className="badge bg-danger-lt text-danger">Failure</span>
-                        )}
-                      </td>
-                      <td className="text-nowrap text-muted">
-                        {new Date(h.finish_time).toLocaleString()}
-                      </td>
-                    </tr>
-                  ))
+                  history.map((h) => {
+                    const savings = h.original_size && h.new_size 
+                      ? ((1 - (h.new_size / h.original_size)) * 100).toFixed(1)
+                      : '0'
+                    return (
+                      <tr key={h.id} onClick={() => setSelectedTask(h)} className="cursor-pointer">
+                        <td className="text-truncate" style={{ maxWidth: '300px' }}>{h.task_label}</td>
+                        <td className="text-nowrap">{formatBytes(h.original_size)}</td>
+                        <td className="text-nowrap">{formatBytes(h.new_size)}</td>
+                        <td className="text-nowrap">
+                          <span className={`badge ${parseFloat(savings) > 0 ? 'bg-green-lt text-success' : 'bg-orange-lt text-warning'}`}>
+                            {parseFloat(savings) > 0 ? `-${savings}%` : `${savings}%`}
+                          </span>
+                        </td>
+                        <td className="text-center">
+                          {h.task_success ? (
+                            <span className="badge bg-success-lt text-success">Success</span>
+                          ) : (
+                            <span className="badge bg-danger-lt text-danger">Failure</span>
+                          )}
+                        </td>
+                        <td className="text-nowrap text-muted">
+                          {formatDate(h.finish_time)}
+                        </td>
+                      </tr>
+                    )
+                  })
                 )
               )}
             </tbody>
@@ -278,6 +438,13 @@ const Tasks: React.FC = () => {
           </ul>
         </div>
       </div>
+
+      {selectedTask && (
+        <TaskDetailsModal 
+          task={selectedTask} 
+          onClose={() => setSelectedTask(null)} 
+        />
+      )}
     </div>
   )
 }

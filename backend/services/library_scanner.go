@@ -412,6 +412,7 @@ func (s *LibraryScanner) runScan() {
 					// Create new task
 					newTask := models.Task{
 						Abspath:        item.abspath,
+						OriginalSize:   info.Size(),
 						Priority:       item.lib.PriorityScore + matchingProfile.Priority,
 						Type:           "file",
 						LibraryID:      item.lib.ID,

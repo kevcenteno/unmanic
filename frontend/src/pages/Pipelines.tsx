@@ -1,9 +1,10 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { api } from '../context/AuthContext';
-import { Plus, Trash, ArrowUp, ArrowDown, Save, ChevronLeft, AlertCircle, CheckCircle, Copy } from 'lucide-react';
+import { Plus, Trash, ArrowUp, ArrowDown, Save, ChevronLeft, AlertCircle, CheckCircle, Copy, Folder } from 'lucide-react';
 import RuleDeck from '../components/RuleDeck';
 import { MatchRule } from '../components/MatchRuleBuilder';
+import DirectoryPicker from '../components/DirectoryPicker';
 
 interface FFmpegSettings {
   video_flags: string;
@@ -24,21 +25,34 @@ const Pipelines: React.FC = () => {
   const isEditing = Boolean(id);
 
   const [name, setName] = useState('');
+  const [rejectLargerFiles, setRejectLargerFiles] = useState(true);
+  const [cachePath, setCachePath] = useState('');
+  const [relocatePath, setRelocatePath] = useState('');
   const [profiles, setProfiles] = useState<Profile[]>([]);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
+  const [showPicker, setShowPicker] = useState(false);
+  const [pickerTarget, setPickerConfig] = useState<{ field: 'cache' | 'relocate'; initial: string }>({ field: 'cache', initial: '/' });
 
   useEffect(() => {
     const fetchData = async () => {
       try {
+        const settingsResp = await api.get('/settings');
+        const globalCache = settingsResp.data.find((s: any) => s.key === 'cache_path')?.value || '/tmp/muxmill/cache';
+
         if (isEditing) {
           const pipeResp = await api.get(`/pipelines/${id}`);
           setName(pipeResp.data.name);
+          setRejectLargerFiles(pipeResp.data.reject_larger_files !== undefined ? pipeResp.data.reject_larger_files : true);
+          setCachePath(pipeResp.data.cache_path || globalCache);
+          setRelocatePath(pipeResp.data.relocate_path || '');
           // Sort profiles by priority when loading
           const sortedProfiles = (pipeResp.data.profiles || []).sort((a: Profile, b: Profile) => a.priority - b.priority);
           setProfiles(sortedProfiles);
+        } else {
+          setCachePath(globalCache);
         }
       } catch (err) {
         console.error('Failed to fetch data', err);
@@ -124,6 +138,9 @@ const Pipelines: React.FC = () => {
 
     const payload = {
       name,
+      reject_larger_files: rejectLargerFiles,
+      cache_path: cachePath,
+      relocate_path: relocatePath,
       profiles
     };
 
@@ -184,11 +201,45 @@ const Pipelines: React.FC = () => {
       <div className="row row-cards">
         <div className="col-12">
           <div className="card">
+            <div className="card-header border-0 pb-0">
+              <h3 className="card-title">Pipeline Settings</h3>
+            </div>
             <div className="card-body">
-              <div className="row">
-                <div className="col-md-12 mb-3">
+              <div className="row g-3">
+                <div className="col-md-8">
                   <label className="form-label required">Template Name</label>
                   <input className="form-control" value={name} onChange={e => setName(e.target.value)} placeholder="e.g. 4K to 1080p Standard" />
+                </div>
+                <div className="col-md-4 d-flex align-items-end">
+                  <label className="form-check form-switch mb-2">
+                    <input 
+                      className="form-check-input" 
+                      type="checkbox" 
+                      checked={rejectLargerFiles}
+                      onChange={(e) => setRejectLargerFiles(e.target.checked)}
+                    />
+                    <span className="form-check-label">Reject if output is larger than input</span>
+                  </label>
+                </div>
+
+                <div className="col-md-6">
+                  <label className="form-label">Cache Path</label>
+                  <div className="input-group">
+                    <span className="input-group-text"><Folder size={16} /></span>
+                    <input className="form-control" value={cachePath} onChange={e => setCachePath(e.target.value)} placeholder="e.g. /tmp/cache" />
+                    <button className="btn btn-outline-secondary" type="button" onClick={() => { setPickerConfig({ field: 'cache', initial: cachePath }); setShowPicker(true); }}>Browse</button>
+                  </div>
+                  <small className="form-hint">Directory where intermediate files are stored during processing.</small>
+                </div>
+
+                <div className="col-md-6">
+                  <label className="form-label">Relocate completed files to (Optional)</label>
+                  <div className="input-group">
+                    <span className="input-group-text"><Folder size={16} /></span>
+                    <input className="form-control" value={relocatePath} onChange={e => setRelocatePath(e.target.value)} placeholder="e.g. /mnt/media/optimized" />
+                    <button className="btn btn-outline-secondary" type="button" onClick={() => { setPickerConfig({ field: 'relocate', initial: relocatePath }); setShowPicker(true); }}>Browse</button>
+                  </div>
+                  <small className="form-hint">Leave empty to replace the original file in its library location.</small>
                 </div>
               </div>
             </div>
@@ -302,6 +353,18 @@ const Pipelines: React.FC = () => {
           )}
         </div>
       </div>
+
+      {showPicker && (
+        <DirectoryPicker 
+          initialPath={pickerTarget.initial || '/'} 
+          onSelect={(path) => { 
+            if (pickerTarget.field === 'cache') setCachePath(path);
+            else setRelocatePath(path);
+            setShowPicker(false);
+          }}
+          onClose={() => setShowPicker(false)}
+        />
+      )}
     </div>
   );
 };

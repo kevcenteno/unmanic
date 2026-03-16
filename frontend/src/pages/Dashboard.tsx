@@ -3,6 +3,13 @@ import { Link } from 'react-router-dom'
 import { useWebSocket } from '../context/WebSocketContext'
 import { List, History, ChevronRight, CheckCircle, XCircle, Cpu } from 'lucide-react'
 
+const formatDate = (dateStr?: string) => {
+  if (!dateStr) return 'N/A'
+  const date = new Date(dateStr)
+  if (date.getFullYear() <= 1) return 'N/A'
+  return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+}
+
 const Dashboard: React.FC = () => {
   const { status, isConnected } = useWebSocket()
   const [loading, setLoading] = useState<boolean>(true)
@@ -154,7 +161,7 @@ const Dashboard: React.FC = () => {
                           )}
                         </td>
                         <td className="text-nowrap text-muted">
-                           {new Date(task.finish_time).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                           {formatDate(task.finish_time)}
                         </td>
                       </tr>
                     ))
