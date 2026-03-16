@@ -101,7 +101,8 @@ type ffprobeOutput struct {
 		BitRate   string `json:"bit_rate"`
 	} `json:"streams"`
 	Format struct {
-		BitRate string `json:"bit_rate"`
+		BitRate  string `json:"bit_rate"`
+		Duration string `json:"duration"`
 	} `json:"format"`
 }
 
@@ -149,6 +150,11 @@ func getMetadata(path string) models.VideoMetadata {
 	if metadata.Bitrate == 0 && probe.Format.BitRate != "" {
 		br, _ := strconv.Atoi(probe.Format.BitRate)
 		metadata.Bitrate = br / 1000
+	}
+
+	if probe.Format.Duration != "" {
+		dur, _ := strconv.ParseFloat(probe.Format.Duration, 64)
+		metadata.Duration = dur
 	}
 
 	return metadata
@@ -203,7 +209,7 @@ func (s *LibraryScanner) runScan() {
 		s.mu.Unlock()
 
 		if lib.Pipeline == nil {
-			db.DB.Where("library_id = ? AND status = ?", lib.ID, "pending").Delete(&models.Task{})
+			db.DB.Where("library_id = ? AND status = ?", lib.ID, "pending").Unscoped().Delete(&models.Task{})
 			continue
 		}
 
@@ -219,32 +225,52 @@ func (s *LibraryScanner) runScan() {
 			})
 		}
 
-		// STEP 2: DISCOVERY OF NEW FILES
+		// Discover new
 		knownPaths := make(map[string]struct{})
-		var paths []string
-		db.DB.Model(&models.Task{}).Where("library_id = ?", lib.ID).Pluck("abspath", &paths)
-		for _, p := range paths {
-			knownPaths[p] = struct{}{}
+		
+		// Helper to normalize and add to knownPaths
+		addPath := func(p string) {
+			if p == "" {
+				return
+			}
+			abs, err := filepath.Abs(filepath.Clean(p))
+			if err == nil {
+				knownPaths[abs] = struct{}{}
+			} else {
+				knownPaths[p] = struct{}{}
+			}
 		}
-		var historyPaths []string
-		db.DB.Model(&models.CompletedTask{}).Where("abspath LIKE ?", lib.Path+"%").Pluck("abspath", &historyPaths)
-		for _, p := range historyPaths {
-			knownPaths[p] = struct{}{}
+
+		var pendingPaths []string
+		db.DB.Model(&models.Task{}).Where("library_id = ?", lib.ID).Pluck("abspath", &pendingPaths)
+		for _, p := range pendingPaths {
+			addPath(p)
+		}
+
+		// Load ALL completed tasks (both successful and failed)
+		var completedTasks []models.CompletedTask
+		db.DB.Select("abspath", "original_path").Find(&completedTasks)
+		for _, ct := range completedTasks {
+			addPath(ct.Abspath)
+			addPath(ct.OriginalPath)
 		}
 
 		filepath.WalkDir(lib.Path, func(path string, d fs.DirEntry, err error) error {
 			if err != nil || d.IsDir() {
 				return nil
 			}
-			ext := strings.ToLower(filepath.Ext(path))
+			
+			absPath, _ := filepath.Abs(filepath.Clean(path))
+			
+			ext := strings.ToLower(filepath.Ext(absPath))
 			if !videoExtensions[ext] {
 				return nil
 			}
-			if _, exists := knownPaths[path]; exists {
+			if _, exists := knownPaths[absPath]; exists {
 				return nil
 			}
 			allWork = append(allWork, scanWorkItem{
-				abspath: path,
+				abspath: absPath,
 				lib:     lib,
 			})
 			return nil
@@ -372,7 +398,7 @@ func (s *LibraryScanner) runScan() {
 				if metadata.Codec == "" {
 					if item.task != nil {
 						log.Printf("Scanner: could not probe file %s, removing task\n", item.abspath)
-						db.DB.Delete(item.task)
+						db.DB.Unscoped().Delete(item.task)
 					}
 					continue
 				}
@@ -380,7 +406,7 @@ func (s *LibraryScanner) runScan() {
 				if item.lib.Pipeline == nil {
 					if item.task != nil {
 						log.Printf("Scanner: task %s no longer has a pipeline, removing\n", item.abspath)
-						db.DB.Delete(item.task)
+						db.DB.Unscoped().Delete(item.task)
 					}
 					continue
 				}
@@ -389,7 +415,7 @@ func (s *LibraryScanner) runScan() {
 				if matchingProfile == nil {
 					if item.task != nil {
 						log.Printf("Scanner: task %s no longer matches any profile, removing\n", item.abspath)
-						db.DB.Delete(item.task)
+						db.DB.Unscoped().Delete(item.task)
 					}
 					continue
 				}
@@ -445,4 +471,5 @@ func (s *LibraryScanner) runScan() {
 	close(doneChan)
 
 	log.Printf("Library scan completed in %v\n", time.Since(startTime))
+	GetForeman().Trigger()
 }

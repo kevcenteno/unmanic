@@ -115,7 +115,7 @@ const AdminLayout: React.FC = () => {
                     <span className="input-icon-addon">
                       <Search size={18} />
                     </span>
-                    <input type="text" value="" className="form-control" placeholder="Search..." aria-label="Search in website" />
+                    <input type="text" value="" className="form-control" placeholder="Search..." aria-label="Search in website" readOnly />
                   </div>
                 </form>
               </div>

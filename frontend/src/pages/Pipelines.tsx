@@ -7,6 +7,8 @@ import { MatchRule } from '../components/MatchRuleBuilder';
 import DirectoryPicker from '../components/DirectoryPicker';
 
 interface FFmpegSettings {
+  custom_main_options?: string;
+  custom_advanced_options?: string;
   video_flags: string;
   container: string;
 }
@@ -70,7 +72,9 @@ const Pipelines: React.FC = () => {
       name: `New Profile ${profiles.length + 1}`,
       match_rule: { logical_op: 'AND', rules: [], property: '', operator: '', value: '' },
       ffmpeg_settings: {
-        video_flags: 'hevc_nvenc -profile:v main10 -pix_fmt p010le -preset p6 -rc vbr -cq 24 -spatial-aq 1 -aq-strength 8 -rc-lookahead 32',
+          custom_main_options: '-hwaccel cuda -hwaccel_output_format cuda',
+          custom_advanced_options: '-max_muxing_queue_size 2048 -vf scale_cuda=format=p010le',
+        video_flags: '-c:v hevc_nvenc -profile:v main10 -pix_fmt p010le -preset p6 -rc vbr -cq 24 -spatial-aq 1 -aq-strength 8 -rc-lookahead 32',
         container: 'original'
       }
     };
@@ -318,7 +322,35 @@ const Pipelines: React.FC = () => {
                       </div>
 
                       <div className="bg-light p-3 rounded border">
-                        <div className="row">
+                        <div className="row g-3">
+                          <div className="col-12">
+                            <label className="form-label small font-weight-bold text-muted">Custom Main Options</label>
+                            <textarea 
+                              className="form-control form-control-sm font-monospace bg-white" 
+                              rows={2}
+                              value={profile.ffmpeg_settings.custom_main_options || ''} 
+                              onChange={e => updateFFmpeg(idx, 'custom_main_options', e.target.value)}
+                              placeholder="e.g. -hwaccel cuda -hwaccel_output_format cuda ..."
+                            />
+                            <small className="form-hint mt-1">
+                              These flags are placed directly after `ffmpeg` and before the input file (`-i`).
+                            </small>
+                          </div>
+                          
+                          <div className="col-12">
+                            <label className="form-label small font-weight-bold text-muted">Custom Advanced Options</label>
+                            <textarea 
+                              className="form-control form-control-sm font-monospace bg-white" 
+                              rows={2}
+                              value={profile.ffmpeg_settings.custom_advanced_options || ''} 
+                              onChange={e => updateFFmpeg(idx, 'custom_advanced_options', e.target.value)}
+                              placeholder="e.g. -vf scale_cuda=format=p010le -max_muxing_queue_size 2048 ..."
+                            />
+                            <small className="form-hint mt-1">
+                              These flags are placed immediately after the input file.
+                            </small>
+                          </div>
+
                           <div className="col-12">
                             <label className="form-label small font-weight-bold text-muted">FFmpeg Video Output Flags</label>
                             <textarea 
@@ -326,10 +358,10 @@ const Pipelines: React.FC = () => {
                               rows={2}
                               value={profile.ffmpeg_settings.video_flags} 
                               onChange={e => updateFFmpeg(idx, 'video_flags', e.target.value)}
-                              placeholder="e.g. hevc_nvenc -profile:v main10 ..."
+                              placeholder="e.g. -c:v hevc_nvenc -profile:v main10 ..."
                             />
-                            <small className="form-hint mt-2">
-                              These flags are passed directly to the FFmpeg command line for video encoding.
+                            <small className="form-hint mt-1">
+                              These flags are placed near the end of the command before the output file.
                             </small>
                           </div>
                         </div>

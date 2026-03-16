@@ -7,11 +7,12 @@ import (
 )
 
 type VideoMetadata struct {
-	Bitrate    int    `json:"bitrate"`
-	Width      int    `json:"width"`
-	Height     int    `json:"height"`
-	Resolution string `json:"resolution"`
-	Codec      string `json:"codec"`
+	Bitrate    int     `json:"bitrate"`
+	Width      int     `json:"width"`
+	Height     int     `json:"height"`
+	Resolution string  `json:"resolution"`
+	Codec      string  `json:"codec"`
+	Duration   float64 `json:"duration"`
 }
 
 // GetMatchingProfile sorts profiles by Priority (ASC) and returns the first match.

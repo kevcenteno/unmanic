@@ -7,7 +7,10 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"os/signal"
 	"strings"
+	"syscall"
+	"time"
 
 	"github.com/gin-contrib/cors"
 	"github.com/gin-gonic/gin"
@@ -46,6 +49,9 @@ func main() {
 
 	// Start Library Scanner service
 	services.GetScanner().Start()
+
+	// Start Foreman service
+	services.GetForeman().Start()
 
 	// Start WebSocket Hub
 	go services.GetHub().Run()
@@ -89,7 +95,9 @@ func main() {
 
 	// Task routes
 	api.GET("/tasks/pending", handlers.GetPendingTasks)
+	api.POST("/tasks/pending/bulk", handlers.BulkActionPendingTasks)
 	api.GET("/tasks/history", handlers.GetHistoryTasks)
+	api.POST("/tasks/history/bulk", handlers.BulkActionHistoryTasks)
 	api.DELETE("/tasks/pending/:id", handlers.RemovePendingTask)
 	api.DELETE("/tasks/history", handlers.ClearHistory)
 
@@ -97,6 +105,12 @@ func main() {
 	api.GET("/settings", handlers.GetSettings)
 	api.PUT("/settings", handlers.UpdateSetting)
 	api.GET("/workers/status", handlers.GetWorkerStatus)
+	api.POST("/workers/pause", handlers.PauseWorkers)
+	api.POST("/workers/resume", handlers.ResumeWorkers)
+	api.POST("/workers/kill", handlers.KillWorkers)
+	api.POST("/workers/:name/pause", handlers.PauseWorker)
+	api.POST("/workers/:name/resume", handlers.ResumeWorker)
+	api.POST("/workers/:name/kill", handlers.KillWorker)
 	api.GET("/workers/groups", handlers.GetWorkerGroups)
 	api.POST("/workers/groups", handlers.CreateWorkerGroup)
 	api.PUT("/workers/groups/:id", handlers.UpdateWorkerGroup)
@@ -155,6 +169,19 @@ func main() {
 	} else {
 		log.Println("Running in DEV_MODE. API only. Use Vite to serve frontend.")
 	}
+
+	// Handle graceful shutdown
+	stop := make(chan os.Signal, 1)
+	signal.Notify(stop, os.Interrupt, syscall.SIGTERM)
+
+	go func() {
+		<-stop
+		log.Println("Shutting down MuxMill...")
+		services.GetForeman().KillAll()
+		// Small delay to allow workers to cleanup
+		time.Sleep(500 * time.Millisecond)
+		os.Exit(0)
+	}()
 
 	// Start server
 	log.Println("Starting MuxMill API on port :8080")

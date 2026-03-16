@@ -49,6 +49,8 @@ type Task struct {
 	ProcessedByWorker string         `json:"processed_by_worker"`
 	Log               string         `gorm:"type:text" json:"log"`
 	ProfileID         uint           `gorm:"index" json:"profile_id"`
+	Library           *Library       `gorm:"foreignKey:LibraryID" json:"library"`
+	Profile           *Profile       `gorm:"foreignKey:ProfileID" json:"profile"`
 	FFmpegSettings    FFmpegSettings `gorm:"serializer:json" json:"ffmpeg_settings"`
 	CreatedAt         time.Time      `json:"created_at"`
 	UpdatedAt         time.Time      `json:"updated_at"`
@@ -60,12 +62,14 @@ type CompletedTask struct {
 	ID                uint   `gorm:"primaryKey" json:"id"`
 	TaskLabel         string `gorm:"not null" json:"task_label"`
 	Abspath           string `gorm:"not null" json:"abspath"`
+	OriginalPath      string `json:"original_path"`
 	OriginalSize      int64  `json:"original_size"`
 	NewSize           int64  `json:"new_size"`
 	TaskSuccess       bool   `gorm:"not null" json:"task_success"`
 	StartTime         time.Time `json:"start_time"`
 	FinishTime        time.Time `json:"finish_time"`
 	ProcessedByWorker string `json:"processed_by_worker"`
+	FFmpegCommand     string `gorm:"type:text" json:"ffmpeg_command"`
 	Log               string `gorm:"type:text" json:"log"`
 	CreatedAt         time.Time `json:"created_at"`
 	UpdatedAt         time.Time `json:"updated_at"`
@@ -101,8 +105,10 @@ type MatchRule struct {
 }
 
 type FFmpegSettings struct {
-	VideoFlags string `json:"video_flags"`
-	Container  string `json:"container"`
+	VideoFlags            string `json:"video_flags"`
+	Container             string `json:"container"`
+	CustomMainOptions     string `json:"custom_main_options"`
+	CustomAdvancedOptions string `json:"custom_advanced_options"`
 }
 
 type Profile struct {

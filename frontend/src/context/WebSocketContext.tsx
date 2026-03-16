@@ -9,9 +9,27 @@ export interface ScanStatus {
   current_library: string
 }
 
+export interface ActiveWorkerStat {
+  worker_name: string
+  task_id: number
+  abspath: string
+  start_time: string
+  ffmpeg_command: string
+  percentage: number
+  elapsed: number
+  eta: number
+  cpu_usage: number
+  mem_usage: number
+  current_log: string
+}
+
 export interface WorkerStatus {
   active: number
   idle: number
+  total_capacity: number
+  is_paused: boolean
+  active_stats?: Record<string, ActiveWorkerStat>
+  paused_workers?: Record<string, boolean>
 }
 
 export interface Task {
@@ -98,13 +116,14 @@ export const WebSocketProvider: React.FC<{ children: React.ReactNode }> = ({ chi
               setStatus(prev => prev ? { ...prev, workers: wsEvent.data, timestamp: new Date().toISOString() } : null)
               break
             case 'TASKS_UPDATE':
+              if (!wsEvent.data) break;
               setStatus(prev => prev ? { 
                 ...prev, 
-                pending: wsEvent.data.pending, 
-                history: wsEvent.data.history,
+                pending: wsEvent.data.pending || [], 
+                history: wsEvent.data.history || [],
                 timestamp: new Date().toISOString() 
               } : null)
-              break
+              break;
           }
         } catch (err) {
           console.error('WS Parse Error', err)
