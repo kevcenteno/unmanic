@@ -3,7 +3,8 @@ import { useSearchParams } from 'react-router-dom'
 import { api } from '../context/AuthContext'
 import { useWebSocket } from '../context/WebSocketContext'
 import { Search, Trash, ChevronLeft, ChevronRight, ArrowUpToLine, ArrowDownToLine, Trash2, ListPlus } from 'lucide-react'
-import TaskDetailsModal from '../components/TaskDetailsModal'
+import PendingTaskModal from '../components/PendingTaskModal'
+import CompletedTaskModal from '../components/CompletedTaskModal'
 import { formatBytes, formatDate, formatStatus } from '../utils/utils'
 
 interface Task {
@@ -55,18 +56,40 @@ const Tasks: React.FC = () => {
   
   const [loading, setLoading] = useState<boolean>(true)
   const [error, setError] = useState<string | null>(null)
-  const [selectedTask, setSelectedTask] = useState<any | null>(null)
+  const [selectedPendingTask, setSelectedPendingTask] = useState<Task | null>(null)
+  const [selectedHistoryTask, setSelectedHistoryTask] = useState<CompletedTask | null>(null)
   
   // Selection state
   const [selectedPendingIds, setSelectedPendingIds] = useState<Set<number>>(new Set())
   const [selectedHistoryIds, setSelectedHistoryIds] = useState<Set<number>>(new Set())
 
+  // Select-all-matching state for pending
+  const [selectAllMatchingPending, setSelectAllMatchingPending] = useState(false)
+  const [excludedPendingIds, setExcludedPendingIds] = useState<Set<number>>(new Set())
+
+  // Select-all-matching state for history
+  const [selectAllMatchingHistory, setSelectAllMatchingHistory] = useState(false)
+  const [excludedHistoryIds, setExcludedHistoryIds] = useState<Set<number>>(new Set())
+
   // Pagination & Filtering state
   const [page, setPage] = useState(1)
-  const [pageSize] = useState(10)
+  const [pageSize, setPageSize] = useState(10)
   const [totalRecords, setTotalRecords] = useState(0)
   const [search, setSearch] = useState('')
   const [statusFilter, setStatusFilter] = useState('')
+
+  // reset helpers must be defined before fetchTasks (per instructions)
+  const resetPendingSelection = () => {
+    setSelectedPendingIds(new Set())
+    setSelectAllMatchingPending(false)
+    setExcludedPendingIds(new Set())
+  }
+
+  const resetHistorySelection = () => {
+    setSelectedHistoryIds(new Set())
+    setSelectAllMatchingHistory(false)
+    setExcludedHistoryIds(new Set())
+  }
 
   const fetchTasks = useCallback(async (isBackground = false) => {
     if (!isBackground) {
@@ -88,7 +111,7 @@ const Tasks: React.FC = () => {
         setPending(newPending)
         
         if (!isBackground) {
-          setSelectedPendingIds(new Set())
+          resetPendingSelection()
         } else {
           setSelectedPendingIds(prev => {
             const newSet = new Set<number>()
@@ -104,7 +127,7 @@ const Tasks: React.FC = () => {
         setHistory(newHistory)
         
         if (!isBackground) {
-          setSelectedHistoryIds(new Set())
+          resetHistorySelection()
         } else {
           setSelectedHistoryIds(prev => {
             const newSet = new Set<number>()
@@ -141,6 +164,8 @@ const Tasks: React.FC = () => {
     setPage(1)
     setSearch('')
     setStatusFilter('')
+    resetPendingSelection()
+    resetHistorySelection()
   }
 
   const handleCancelPending = async (e: React.MouseEvent, id: number) => {
@@ -170,12 +195,23 @@ const Tasks: React.FC = () => {
     if (e.target.checked) {
       setSelectedPendingIds(new Set(pending.map(t => t.id)))
     } else {
-      setSelectedPendingIds(new Set())
+      resetPendingSelection()
     }
   }
 
   const handleSelectRowPending = (e: React.MouseEvent | React.ChangeEvent, id: number) => {
     e.stopPropagation()
+    if (selectAllMatchingPending) {
+      const newExcluded = new Set(excludedPendingIds)
+      if (newExcluded.has(id)) {
+        newExcluded.delete(id)
+      } else {
+        newExcluded.add(id)
+      }
+      setExcludedPendingIds(newExcluded)
+      return
+    }
+
     const newSelected = new Set(selectedPendingIds)
     if (newSelected.has(id)) {
       newSelected.delete(id)
@@ -189,12 +225,23 @@ const Tasks: React.FC = () => {
     if (e.target.checked) {
       setSelectedHistoryIds(new Set(history.map(t => t.id)))
     } else {
-      setSelectedHistoryIds(new Set())
+      resetHistorySelection()
     }
   }
 
   const handleSelectRowHistory = (e: React.MouseEvent | React.ChangeEvent, id: number) => {
     e.stopPropagation()
+    if (selectAllMatchingHistory) {
+      const newExcluded = new Set(excludedHistoryIds)
+      if (newExcluded.has(id)) {
+        newExcluded.delete(id)
+      } else {
+        newExcluded.add(id)
+      }
+      setExcludedHistoryIds(newExcluded)
+      return
+    }
+
     const newSelected = new Set(selectedHistoryIds)
     if (newSelected.has(id)) {
       newSelected.delete(id)
@@ -205,17 +252,32 @@ const Tasks: React.FC = () => {
   }
 
   const handleBulkActionPending = async (action: 'move_top' | 'move_bottom' | 'remove') => {
-    if (selectedPendingIds.size === 0) return
-    if (action === 'remove' && !window.confirm(`Are you sure you want to cancel and remove ${selectedPendingIds.size} tasks? They will not be rescanned.`)) {
-      return
+    const pendingSelectedCount = selectAllMatchingPending
+      ? Math.max(0, totalRecords - excludedPendingIds.size)
+      : selectedPendingIds.size
+
+    if (pendingSelectedCount === 0) return
+    if (action === 'remove') {
+      const count = pendingSelectedCount
+      if (!window.confirm(`Are you sure you want to cancel and remove ${count} tasks? They will not be rescanned.`)) return
     }
 
     try {
-      await api.post('/tasks/pending/bulk', {
-        action,
-        task_ids: Array.from(selectedPendingIds)
-      })
-      setSelectedPendingIds(new Set())
+      const payload = selectAllMatchingPending
+        ? {
+            action,
+            selection_mode: 'all_filtered',
+            search,
+            exclude_ids: Array.from(excludedPendingIds),
+          }
+        : {
+            action,
+            selection_mode: 'explicit',
+            task_ids: Array.from(selectedPendingIds),
+          }
+
+      await api.post('/tasks/pending/bulk', payload)
+      resetPendingSelection()
       fetchTasks()
     } catch (err) {
       console.error('Bulk action failed', err)
@@ -224,17 +286,33 @@ const Tasks: React.FC = () => {
   }
 
   const handleBulkActionHistory = async (action: 'requeue' | 'remove') => {
-    if (selectedHistoryIds.size === 0) return
-    if (action === 'remove' && !window.confirm(`Are you sure you want to permanently remove ${selectedHistoryIds.size} tasks from history?`)) {
-      return
+    const historySelectedCount = selectAllMatchingHistory
+      ? Math.max(0, totalRecords - excludedHistoryIds.size)
+      : selectedHistoryIds.size
+
+    if (historySelectedCount === 0) return
+    if (action === 'remove') {
+      const count = historySelectedCount
+      if (!window.confirm(`Are you sure you want to permanently remove ${count} tasks from history?`)) return
     }
 
     try {
-      await api.post('/tasks/history/bulk', {
-        action,
-        task_ids: Array.from(selectedHistoryIds)
-      })
-      setSelectedHistoryIds(new Set())
+      const payload = selectAllMatchingHistory
+        ? {
+            action,
+            selection_mode: 'all_filtered',
+            search,
+            status: statusFilter,
+            exclude_ids: Array.from(excludedHistoryIds),
+          }
+        : {
+            action,
+            selection_mode: 'explicit',
+            task_ids: Array.from(selectedHistoryIds),
+          }
+
+      await api.post('/tasks/history/bulk', payload)
+      resetHistorySelection()
       fetchTasks()
     } catch (err) {
       console.error('History bulk action failed', err)
@@ -285,11 +363,20 @@ const Tasks: React.FC = () => {
 
         <div className="card-body border-bottom py-3">
           <div className="d-flex">
-            <div className="text-muted">
+            <div className="text-muted d-flex align-items-center">
               Show
-              <div className="mx-2 d-inline-block">
-                <input type="text" className="form-control form-control-sm" value={pageSize} size={1} disabled readOnly />
-              </div>
+              <select
+                className="form-select form-select-sm mx-2"
+                style={{ width: 'auto' }}
+                value={pageSize}
+                onChange={(e) => { setPageSize(Number(e.target.value)); setPage(1) }}
+              >
+                <option value={10}>10</option>
+                <option value={25}>25</option>
+                <option value={50}>50</option>
+                <option value={100}>100</option>
+                <option value={250}>250</option>
+              </select>
               entries
             </div>
             <div className="ms-auto d-flex">
@@ -322,34 +409,120 @@ const Tasks: React.FC = () => {
         </div>
 
         <div className="table-responsive">
-          {activeTab === 'pending' && selectedPendingIds.size > 0 && (
-            <div className="bg-blue-lt p-2 border-bottom d-flex align-items-center">
-              <span className="me-3 small fw-bold text-primary">{selectedPendingIds.size} selected</span>
-              <div className="btn-list">
-                <button className="btn btn-sm btn-outline-primary" onClick={() => handleBulkActionPending('move_top')}>
-                  <ArrowUpToLine size={14} className="me-1" /> Move Top
-                </button>
-                <button className="btn btn-sm btn-outline-primary" onClick={() => handleBulkActionPending('move_bottom')}>
-                  <ArrowDownToLine size={14} className="me-1" /> Move Bottom
-                </button>
-                <button className="btn btn-sm btn-danger" onClick={() => handleBulkActionPending('remove')}>
-                  <Trash2 size={14} className="me-1" /> Remove
-                </button>
-              </div>
-            </div>
+          {activeTab === 'pending' && (
+            (() => {
+              const pendingSelectedCount = selectAllMatchingPending
+                ? Math.max(0, totalRecords - excludedPendingIds.size)
+                : selectedPendingIds.size
+
+              const showSelectAllMatchingPrompt = !selectAllMatchingPending && pending.length > 0 && selectedPendingIds.size === pending.length && totalRecords > pending.length
+
+              if (pendingSelectedCount === 0 && !selectAllMatchingPending && !showSelectAllMatchingPrompt) return null
+
+              return (
+                <>
+                  <div className="bg-blue-lt p-2 border-bottom d-flex align-items-center flex-wrap gap-2">
+                    <span className="small fw-bold text-primary">{pendingSelectedCount} selected</span>
+                    <div className="btn-list ms-3">
+                      <button className="btn btn-sm btn-outline-primary" onClick={() => handleBulkActionPending('move_top')}>
+                        <ArrowUpToLine size={14} className="me-1" /> Move Top
+                      </button>
+                      <button className="btn btn-sm btn-outline-primary" onClick={() => handleBulkActionPending('move_bottom')}>
+                        <ArrowDownToLine size={14} className="me-1" /> Move Bottom
+                      </button>
+                      <button className="btn btn-sm btn-danger" onClick={() => handleBulkActionPending('remove')}>
+                        <Trash2 size={14} className="me-1" /> Remove
+                      </button>
+                    </div>
+                  </div>
+                  {(showSelectAllMatchingPrompt || selectAllMatchingPending) && (
+                    <div className="bg-blue-lt border-bottom text-center py-2 small">
+                      {showSelectAllMatchingPrompt ? (
+                        <>
+                          All {pending.length} tasks on this page are selected.{' '}
+                          <button
+                            className="btn btn-link btn-sm p-0 text-primary fw-bold"
+                            onClick={() => {
+                              setSelectAllMatchingPending(true)
+                              setSelectedPendingIds(new Set())
+                              setExcludedPendingIds(new Set())
+                            }}
+                          >
+                            Select all {totalRecords} matching tasks
+                          </button>
+                        </>
+                      ) : (
+                        <>
+                          All {totalRecords} tasks are selected.{' '}
+                          <button
+                            className="btn btn-link btn-sm p-0 text-primary fw-bold"
+                            onClick={resetPendingSelection}
+                          >
+                            Clear selection
+                          </button>
+                        </>
+                      )}
+                    </div>
+                  )}
+                </>
+              )
+            })()
           )}
-          {activeTab === 'history' && selectedHistoryIds.size > 0 && (
-            <div className="bg-blue-lt p-2 border-bottom d-flex align-items-center">
-              <span className="me-3 small fw-bold text-primary">{selectedHistoryIds.size} selected</span>
-              <div className="btn-list">
-                <button className="btn btn-sm btn-outline-primary" onClick={() => handleBulkActionHistory('requeue')}>
-                  <ListPlus size={14} className="me-1" /> Add to Pending Queue
-                </button>
-                <button className="btn btn-sm btn-danger" onClick={() => handleBulkActionHistory('remove')}>
-                  <Trash2 size={14} className="me-1" /> Remove from History
-                </button>
-              </div>
-            </div>
+          {activeTab === 'history' && (
+            (() => {
+              const historySelectedCount = selectAllMatchingHistory
+                ? Math.max(0, totalRecords - excludedHistoryIds.size)
+                : selectedHistoryIds.size
+
+              const showSelectAllMatchingPrompt = !selectAllMatchingHistory && history.length > 0 && selectedHistoryIds.size === history.length && totalRecords > history.length
+
+              if (historySelectedCount === 0 && !selectAllMatchingHistory && !showSelectAllMatchingPrompt) return null
+
+              return (
+                <>
+                  <div className="bg-blue-lt p-2 border-bottom d-flex align-items-center flex-wrap gap-2">
+                    <span className="small fw-bold text-primary">{historySelectedCount} selected</span>
+                    <div className="btn-list ms-3">
+                      <button className="btn btn-sm btn-outline-primary" onClick={() => handleBulkActionHistory('requeue')}>
+                        <ListPlus size={14} className="me-1" /> Add to Pending Queue
+                      </button>
+                      <button className="btn btn-sm btn-danger" onClick={() => handleBulkActionHistory('remove')}>
+                        <Trash2 size={14} className="me-1" /> Remove from History
+                      </button>
+                    </div>
+                  </div>
+                  {(showSelectAllMatchingPrompt || selectAllMatchingHistory) && (
+                    <div className="bg-blue-lt border-bottom text-center py-2 small">
+                      {showSelectAllMatchingPrompt ? (
+                        <>
+                          All {history.length} tasks on this page are selected.{' '}
+                          <button
+                            className="btn btn-link btn-sm p-0 text-primary fw-bold"
+                            onClick={() => {
+                              setSelectAllMatchingHistory(true)
+                              setSelectedHistoryIds(new Set())
+                              setExcludedHistoryIds(new Set())
+                            }}
+                          >
+                            Select all {totalRecords} matching tasks
+                          </button>
+                        </>
+                      ) : (
+                        <>
+                          All {totalRecords} tasks are selected.{' '}
+                          <button
+                            className="btn btn-link btn-sm p-0 text-primary fw-bold"
+                            onClick={resetHistorySelection}
+                          >
+                            Clear selection
+                          </button>
+                        </>
+                      )}
+                    </div>
+                  )}
+                </>
+              )
+            })()
           )}
           <table className="table table-vcenter card-table table-hover">
             <thead>
@@ -360,7 +533,7 @@ const Tasks: React.FC = () => {
                       type="checkbox" 
                       className="form-check-input m-0" 
                       onChange={handleSelectAllPending}
-                      checked={pending.length > 0 && selectedPendingIds.size === pending.length}
+                      checked={selectAllMatchingPending || (pending.length > 0 && selectedPendingIds.size === pending.length)}
                     />
                   </th>
                   <th>File Path</th>
@@ -378,7 +551,7 @@ const Tasks: React.FC = () => {
                       type="checkbox" 
                       className="form-check-input m-0" 
                       onChange={handleSelectAllHistory}
-                      checked={history.length > 0 && selectedHistoryIds.size === history.length}
+                      checked={selectAllMatchingHistory || (history.length > 0 && selectedHistoryIds.size === history.length)}
                     />
                   </th>
                   <th>Task Label</th>
@@ -401,13 +574,13 @@ const Tasks: React.FC = () => {
                 pending.length === 0 ? (
                   <tr><td colSpan={8} className="text-center py-4 text-muted">No pending tasks found.</td></tr>
                 ) : (
-                  pending.map((t) => (
-                    <tr key={t.id} onClick={() => setSelectedTask(t)} className="cursor-pointer">
+                pending.map((t) => (
+                    <tr key={t.id} onClick={() => setSelectedPendingTask(t)} className="cursor-pointer">
                       <td onClick={(e) => e.stopPropagation()}>
                         <input 
                           type="checkbox" 
                           className="form-check-input m-0"
-                          checked={selectedPendingIds.has(t.id)}
+                          checked={selectAllMatchingPending ? !excludedPendingIds.has(t.id) : selectedPendingIds.has(t.id)}
                           onChange={(e) => handleSelectRowPending(e, t.id)}
                         />
                       </td>
@@ -434,7 +607,7 @@ const Tasks: React.FC = () => {
                         </button>
                       </td>
                     </tr>
-                  ))
+                    ))
                 )
               ) : (
                 history.length === 0 ? (
@@ -445,12 +618,12 @@ const Tasks: React.FC = () => {
                       ? ((1 - (h.new_size / h.original_size)) * 100).toFixed(1)
                       : '0'
                     return (
-                      <tr key={h.id} onClick={() => setSelectedTask(h)} className="cursor-pointer">
+                      <tr key={h.id} onClick={() => setSelectedHistoryTask(h)} className="cursor-pointer">
                         <td onClick={(e) => e.stopPropagation()}>
                           <input 
                             type="checkbox" 
                             className="form-check-input m-0"
-                            checked={selectedHistoryIds.has(h.id)}
+                            checked={selectAllMatchingHistory ? !excludedHistoryIds.has(h.id) : selectedHistoryIds.has(h.id)}
                             onChange={(e) => handleSelectRowHistory(e, h.id)}
                           />
                         </td>
@@ -500,11 +673,11 @@ const Tasks: React.FC = () => {
         </div>
       </div>
 
-      {selectedTask && (
-        <TaskDetailsModal 
-          task={selectedTask} 
-          onClose={() => setSelectedTask(null)} 
-        />
+      {selectedPendingTask && (
+        <PendingTaskModal task={selectedPendingTask} onClose={() => setSelectedPendingTask(null)} />
+      )}
+      {selectedHistoryTask && (
+        <CompletedTaskModal task={selectedHistoryTask} onClose={() => setSelectedHistoryTask(null)} />
       )}
     </div>
   )

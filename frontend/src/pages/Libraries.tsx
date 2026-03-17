@@ -1,7 +1,9 @@
 import React, { useEffect, useState } from 'react'
-import { Plus, Trash, Folder, AlertTriangle, RefreshCcw, CheckCircle, Workflow } from 'lucide-react'
+import { Plus, Trash, Folder, AlertTriangle, RefreshCcw, CheckCircle, Workflow, BarChart2 } from 'lucide-react'
 import { api } from '../context/AuthContext'
 import DirectoryPicker from '../components/DirectoryPicker'
+import LibraryStatsModal from '../components/LibraryStatsModal'
+import { useWebSocket } from '../context/WebSocketContext'
 
 interface Library {
   id: number
@@ -18,6 +20,13 @@ interface Library {
 interface Pipeline {
   id: number
   name: string
+}
+
+interface LibrarySummaryStats {
+  library_id: number
+  files_processed: number
+  original_size: number
+  new_size: number
 }
 
 const Libraries: React.FC = () => {
@@ -46,6 +55,9 @@ const Libraries: React.FC = () => {
   const [submitting, setSubmitting] = useState<boolean>(false)
   const [submitError, setSubmitError] = useState<string | null>(null)
   const [showPicker, setShowPicker] = useState<boolean>(false)
+  const { lastEvent } = useWebSocket()
+  const [libStats, setLibStats] = useState<Record<number, LibrarySummaryStats>>({})
+  const [statsModal, setStatsModal] = useState<{ id: number; name: string } | null>(null)
 
   const fetchLibraries = async () => {
     setLoading(true)
@@ -65,8 +77,22 @@ const Libraries: React.FC = () => {
     }
   }
 
+  const fetchStats = async () => {
+    try {
+      const resp = await api.get<LibrarySummaryStats[]>('/libraries/stats')
+      const map: Record<number, LibrarySummaryStats> = {}
+      for (const s of resp.data ?? []) {
+        map[s.library_id] = s
+      }
+      setLibStats(map)
+    } catch (err) {
+      // stats are non-critical, silently ignore
+    }
+  }
+
   useEffect(() => {
     fetchLibraries()
+    fetchStats()
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
@@ -164,6 +190,23 @@ const Libraries: React.FC = () => {
     }
   }
 
+  useEffect(() => {
+    if (lastEvent?.type === 'STATS_UPDATE') {
+      fetchStats()
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [lastEvent])
+
+  const getSavedLabel = (libId: number): string => {
+    const s = libStats[libId]
+    if (!s || s.files_processed === 0) return '—'
+    const saved = s.original_size - s.new_size
+    if (saved <= 0) return '—'
+    const units = ['B', 'KiB', 'MiB', 'GiB', 'TiB']
+    const i = Math.min(Math.floor(Math.log(saved) / Math.log(1024)), units.length - 1)
+    return `${(saved / Math.pow(1024, i)).toFixed(1)} ${units[i]}`
+  }
+
   return (
     <div className="container-xl">
       {/* Page Header */}
@@ -258,6 +301,7 @@ const Libraries: React.FC = () => {
                       <th>Processing Pipeline</th>
                       <th className="text-center">Scanner</th>
                       <th className="text-center">Inotify</th>
+                      <th className="text-center">Saved</th>
                       <th className="w-1"></th>
                     </tr>
                   </thead>
@@ -329,6 +373,22 @@ const Libraries: React.FC = () => {
                               <span className="badge badge-outline text-success">Active</span>
                             ) : (
                               <span className="badge badge-outline text-secondary">Disabled</span>
+                            )}
+                          </div>
+                        </td>
+                        <td className="p-0 text-center">
+                          <div className="p-3">
+                            {libStats[lib.id]?.files_processed > 0 ? (
+                              <button
+                                className="btn btn-sm btn-ghost-success px-2 py-1"
+                                onClick={(e) => { e.stopPropagation(); setStatsModal({ id: lib.id, name: lib.name }) }}
+                                title="View transcode savings"
+                              >
+                                <BarChart2 size={14} className="me-1" />
+                                {getSavedLabel(lib.id)}
+                              </button>
+                            ) : (
+                              <span className="text-muted small">—</span>
                             )}
                           </div>
                         </td>
@@ -503,6 +563,13 @@ const Libraries: React.FC = () => {
           initialPath={formState.path || '/'} 
           onSelect={(path) => { setFormState({ ...formState, path: path }); setShowPicker(false) }}
           onClose={() => setShowPicker(false)}
+        />
+      )}
+      {statsModal && (
+        <LibraryStatsModal
+          libraryId={statsModal.id}
+          libraryName={statsModal.name}
+          onClose={() => setStatsModal(null)}
         />
       )}
     </div>

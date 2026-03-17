@@ -4,14 +4,16 @@ import { api } from '../context/AuthContext'
 import { useWebSocket, ActiveWorkerStat } from '../context/WebSocketContext'
 import { List, History, ChevronRight, CheckCircle, XCircle, Cpu, Pause, Play, XOctagon } from 'lucide-react'
 import WorkerDetailsModal from '../components/WorkerDetailsModal'
-import TaskDetailsModal from '../components/TaskDetailsModal'
+import PendingTaskModal from '../components/PendingTaskModal'
+import CompletedTaskModal from '../components/CompletedTaskModal'
 import { formatTimeOnly, formatStatus, formatTime } from '../utils/utils'
 
 const Dashboard: React.FC = () => {
   const { status, isConnected } = useWebSocket()
   const [loading, setLoading] = useState<boolean>(true)
   const [selectedWorkerName, setSelectedWorkerName] = useState<string | null>(null)
-  const [selectedTask, setSelectedTask] = useState<any | null>(null)
+  const [selectedPendingTask, setSelectedPendingTask] = useState<any | null>(null)
+  const [selectedHistoryTask, setSelectedHistoryTask] = useState<any | null>(null)
 
   const handlePause = async () => {
     try {
@@ -197,7 +199,7 @@ const Dashboard: React.FC = () => {
                     <tr><td colSpan={4} className="text-center py-4 text-muted">No pending tasks.</td></tr>
                   ) : (
                     pendingTasks.map((task) => (
-                      <tr key={task.id} className="cursor-pointer" onClick={() => setSelectedTask(task)}>
+                      <tr key={task.id} className="cursor-pointer" onClick={() => setSelectedPendingTask(task)}>
                         <td className="small text-muted" title={task.abspath}>
                           <div className="fw-bold mb-1 text-primary">{task.library?.name || '-'}</div>
                           <code>{task.abspath}</code>
@@ -254,7 +256,7 @@ const Dashboard: React.FC = () => {
                     <tr><td colSpan={3} className="text-center py-4 text-muted">No completed tasks.</td></tr>
                   ) : (
                     completedTasks.map((task) => (
-                      <tr key={task.id} className="cursor-pointer" onClick={() => setSelectedTask(task)}>
+                      <tr key={task.id} className="cursor-pointer" onClick={() => setSelectedHistoryTask(task)}>
                         <td className="small text-muted" title={task.abspath}>
                           <code>{task.abspath}</code>
                         </td>
@@ -286,10 +288,17 @@ const Dashboard: React.FC = () => {
         />
       )}
 
-      {selectedTask && (
-        <TaskDetailsModal 
-          task={selectedTask} 
-          onClose={() => setSelectedTask(null)} 
+      {selectedPendingTask && (
+        <PendingTaskModal
+          task={selectedPendingTask}
+          onClose={() => setSelectedPendingTask(null)}
+        />
+      )}
+
+      {selectedHistoryTask && (
+        <CompletedTaskModal
+          task={selectedHistoryTask}
+          onClose={() => setSelectedHistoryTask(null)}
         />
       )}
     </div>

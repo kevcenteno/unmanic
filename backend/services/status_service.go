@@ -7,11 +7,11 @@ import (
 )
 
 type FullStatus struct {
-	Scanner   ScannerStatus   `json:"scanner"`
-	Workers   WorkerStatus    `json:"workers"`
-	Pending   []models.Task   `json:"pending"`
+	Scanner   ScannerStatus          `json:"scanner"`
+	Workers   WorkerStatus           `json:"workers"`
+	Pending   []models.Task          `json:"pending"`
 	History   []models.CompletedTask `json:"history"`
-	Timestamp time.Time       `json:"timestamp"`
+	Timestamp time.Time              `json:"timestamp"`
 }
 
 type ActiveWorkerStat struct {

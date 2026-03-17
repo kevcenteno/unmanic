@@ -18,7 +18,6 @@ import (
 	"gorm.io/gorm/clause"
 )
 
-const numScannerWorkers = 10
 const metadataBatchSize = 50
 
 var (
@@ -227,7 +226,7 @@ func (s *LibraryScanner) runScan() {
 
 		// Discover new
 		knownPaths := make(map[string]struct{})
-		
+
 		// Helper to normalize and add to knownPaths
 		addPath := func(p string) {
 			if p == "" {
@@ -259,9 +258,9 @@ func (s *LibraryScanner) runScan() {
 			if err != nil || d.IsDir() {
 				return nil
 			}
-			
+
 			absPath, _ := filepath.Abs(filepath.Clean(path))
-			
+
 			ext := strings.ToLower(filepath.Ext(absPath))
 			if !videoExtensions[ext] {
 				return nil
@@ -347,8 +346,11 @@ func (s *LibraryScanner) runScan() {
 		}
 	}()
 
+	// Determine number of concurrent probing workers from settings
+	numWorkers := getConcurrentFileTesters()
+
 	// Start Probing Workers
-	for i := 0; i < numScannerWorkers; i++ {
+	for i := 0; i < numWorkers; i++ {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
@@ -368,7 +370,7 @@ func (s *LibraryScanner) runScan() {
 
 				var caches []models.FileMetadataCache
 				db.DB.Where("abspath = ?", item.abspath).Limit(1).Find(&caches)
-				
+
 				var metadata models.VideoMetadata
 				cacheFound := false
 				if len(caches) > 0 {

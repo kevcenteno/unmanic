@@ -1,6 +1,9 @@
-export const formatBytes = (bytes: number) => {
-  if (!bytes) return '0 MB'
-  return (bytes / (1024 * 1024)).toFixed(2) + ' MB'
+export const formatBytes = (bytes: number): string => {
+  if (!bytes || bytes === 0) return '0 B'
+  const units = ['B', 'KiB', 'MiB', 'GiB', 'TiB']
+  const i = Math.min(Math.floor(Math.log(Math.abs(bytes)) / Math.log(1024)), units.length - 1)
+  const value = bytes / Math.pow(1024, i)
+  return `${value.toFixed(i === 0 ? 0 : 1)} ${units[i]}`
 }
 
 export const formatDate = (dateStr?: string, fallback: string = 'N/A') => {

@@ -13,14 +13,15 @@ import (
 )
 
 type Foreman struct {
-	workChan      chan models.Task
-	mu            sync.Mutex
-	triggerChan   chan bool
-	isPaused      bool
-	pausedWorkers map[string]bool
-	cancelFuncs   map[string]context.CancelFunc
-	activeStats   map[string]ActiveWorkerStat
-	workerSignals map[string]chan string
+	workChan          chan models.Task
+	mu                sync.Mutex
+	triggerChan       chan bool
+	isPaused          bool
+	pausedWorkers     map[string]bool
+	cancelFuncs       map[string]context.CancelFunc
+	activeStats       map[string]ActiveWorkerStat
+	workerSignals     map[string]chan string
+	deletingLibraries map[uint]bool
 }
 
 var (
@@ -31,15 +32,47 @@ var (
 func GetForeman() *Foreman {
 	foremanOnce.Do(func() {
 		foremanInstance = &Foreman{
-			workChan:      make(chan models.Task),
-			triggerChan:   make(chan bool, 1),
-			pausedWorkers: make(map[string]bool),
-			cancelFuncs:   make(map[string]context.CancelFunc),
-			activeStats:   make(map[string]ActiveWorkerStat),
-			workerSignals: make(map[string]chan string),
+			workChan:          make(chan models.Task),
+			triggerChan:       make(chan bool, 1),
+			pausedWorkers:     make(map[string]bool),
+			cancelFuncs:       make(map[string]context.CancelFunc),
+			activeStats:       make(map[string]ActiveWorkerStat),
+			workerSignals:     make(map[string]chan string),
+			deletingLibraries: make(map[uint]bool),
 		}
 	})
 	return foremanInstance
+}
+
+func (f *Foreman) MarkLibraryDeleting(libraryID uint) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.deletingLibraries[libraryID] = true
+}
+
+func (f *Foreman) UnmarkLibraryDeleting(libraryID uint) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	delete(f.deletingLibraries, libraryID)
+}
+
+func (f *Foreman) IsLibraryDeleting(libraryID uint) bool {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.deletingLibraries[libraryID]
+}
+
+func (f *Foreman) KillWorkersForLibrary(libraryID uint) {
+	var workerNames []string
+	db.DB.Model(&models.Task{}).
+		Where("library_id = ? AND status = ?", libraryID, "in_progress").
+		Pluck("processed_by_worker", &workerNames)
+	for _, name := range workerNames {
+		if name == "" {
+			continue
+		}
+		f.KillWorker(name)
+	}
 }
 
 func (f *Foreman) GetWorkerSignalChan(name string) chan string {

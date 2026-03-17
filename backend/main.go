@@ -81,6 +81,10 @@ func main() {
 	// Library routes
 	api.GET("/libraries", handlers.GetLibraries)
 	api.GET("/libraries/scan-status", handlers.GetScannerStatus)
+	// Library stats routes
+	api.GET("/libraries/stats", handlers.GetAllLibrariesStats)
+	api.GET("/libraries/:id/stats", handlers.GetLibraryStats)
+	api.POST("/libraries/stats/backfill", handlers.BackfillLibraryStats)
 	api.POST("/libraries", handlers.CreateLibrary)
 	api.POST("/libraries/rescan", handlers.TriggerLibraryScan)
 	api.PUT("/libraries/:id", handlers.UpdateLibrary)
@@ -135,7 +139,7 @@ func main() {
 					c.JSON(http.StatusNotFound, gin.H{"error": "api endpoint not found"})
 					return
 				}
-				
+
 				// Serve index.html for SPA routing or the actual file if it exists at root
 				// First check if the exact path exists in the embedded fs (e.g. /vite.svg)
 				if path := strings.TrimPrefix(c.Request.URL.Path, "/"); path != "" {

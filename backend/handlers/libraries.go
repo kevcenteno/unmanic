@@ -4,6 +4,7 @@ import (
 	"errors"
 	"net/http"
 	"strconv"
+	"time"
 
 	"github.com/gin-gonic/gin"
 	"gorm.io/gorm"
@@ -84,6 +85,8 @@ func GetScannerStatus(c *gin.Context) {
 }
 
 // DeleteLibrary removes a library by :id
+// DeleteLibrary removes a library by :id, cancels any running workers for that
+// library, then hard-deletes all associated tasks and history by library_id.
 func DeleteLibrary(c *gin.Context) {
 	idStr := c.Param("id")
 	id, err := strconv.ParseUint(idStr, 10, 64)
@@ -102,24 +105,41 @@ func DeleteLibrary(c *gin.Context) {
 		return
 	}
 
-	// Remove associated tasks first
-	if err := db.DB.Unscoped().Where("library_id = ?", id).Delete(&models.Task{}).Error; err != nil {
+	libraryID := uint(id)
+
+	// Mark the library as being deleted so worker failure handler skips
+	// creating CompletedTask entries for cancelled tasks.
+	services.GetForeman().MarkLibraryDeleting(libraryID)
+	defer services.GetForeman().UnmarkLibraryDeleting(libraryID)
+
+	// Kill any workers currently processing tasks for this library.
+	// This must happen before deleting tasks/history to avoid post-delete
+	// CompletedTask rows being created by those workers.
+	services.GetForeman().KillWorkersForLibrary(libraryID)
+
+	// Short pause to allow in-flight goroutines to observe cancellation.
+	time.Sleep(500 * time.Millisecond)
+
+	// Delete all pending/in-progress tasks for this library
+	if err := db.DB.Unscoped().Where("library_id = ?", libraryID).Delete(&models.Task{}).Error; err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to delete associated tasks"})
 		return
 	}
 
-	// Remove associated history first (CompletedTask)
-	// We use the library path to find history records since they don't have a direct LibraryID foreign key.
-	if err := db.DB.Unscoped().Where("abspath LIKE ?", lib.Path+"%").Delete(&models.CompletedTask{}).Error; err != nil {
+	// Delete all completed task history for this library (by library_id — robust)
+	if err := db.DB.Unscoped().Where("library_id = ?", libraryID).Delete(&models.CompletedTask{}).Error; err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to delete associated history"})
 		return
 	}
 
-	// Perform a hard delete of the library
+	// Hard-delete the library itself
 	if err := db.DB.Unscoped().Delete(&lib).Error; err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to delete library"})
 		return
 	}
+
+	// Publish a stats refresh event so connected clients can update
+	services.GetHub().Publish("STATS_UPDATE", gin.H{"library_id": libraryID})
 
 	c.Status(http.StatusOK)
 }

@@ -132,8 +132,81 @@ func ClearHistory(c *gin.Context) {
 }
 
 type BulkActionRequest struct {
-	Action  string   `json:"action" binding:"required"`
-	TaskIDs []uint64 `json:"task_ids" binding:"required"`
+	Action        string   `json:"action"         binding:"required"`
+	SelectionMode string   `json:"selection_mode"` // "explicit" (default) or "all_filtered"
+	TaskIDs       []uint64 `json:"task_ids"`       // used when selection_mode == "explicit"
+	ExcludeIDs    []uint64 `json:"exclude_ids"`    // used when selection_mode == "all_filtered"
+	Search        string   `json:"search"`         // filter passthrough for all_filtered
+	Status        string   `json:"status"`         // history only: "success" or "fail"
+	LibraryIDs    []string `json:"library_ids"`    // pending only: library filter
+}
+
+// resolvePendingIDs resolves the set of pending task IDs to act on based on selection_mode.
+func resolvePendingIDs(req BulkActionRequest) ([]uint64, error) {
+	if req.SelectionMode != "all_filtered" {
+		return req.TaskIDs, nil
+	}
+
+	query := db.DB.Model(&models.Task{}).Where("status != ?", "processed")
+	if req.Search != "" {
+		query = query.Where("abspath LIKE ?", "%"+req.Search+"%")
+	}
+	if len(req.LibraryIDs) > 0 {
+		query = query.Where("library_id IN ?", req.LibraryIDs)
+	}
+
+	var tasks []models.Task
+	if err := query.Order("priority desc, id asc").Find(&tasks).Error; err != nil {
+		return nil, err
+	}
+
+	excludeSet := make(map[uint64]struct{}, len(req.ExcludeIDs))
+	for _, id := range req.ExcludeIDs {
+		excludeSet[id] = struct{}{}
+	}
+
+	ids := make([]uint64, 0, len(tasks))
+	for _, t := range tasks {
+		if _, excluded := excludeSet[uint64(t.ID)]; !excluded {
+			ids = append(ids, uint64(t.ID))
+		}
+	}
+	return ids, nil
+}
+
+// resolveHistoryIDs resolves the set of completed task IDs to act on based on selection_mode.
+func resolveHistoryIDs(req BulkActionRequest) ([]uint64, error) {
+	if req.SelectionMode != "all_filtered" {
+		return req.TaskIDs, nil
+	}
+
+	query := db.DB.Model(&models.CompletedTask{})
+	if req.Search != "" {
+		query = query.Where("abspath LIKE ? OR task_label LIKE ?", "%"+req.Search+"%", "%"+req.Search+"%")
+	}
+	if req.Status == "success" {
+		query = query.Where("task_success = ?", true)
+	} else if req.Status == "fail" {
+		query = query.Where("task_success = ?", false)
+	}
+
+	var tasks []models.CompletedTask
+	if err := query.Order("finish_time desc").Find(&tasks).Error; err != nil {
+		return nil, err
+	}
+
+	excludeSet := make(map[uint64]struct{}, len(req.ExcludeIDs))
+	for _, id := range req.ExcludeIDs {
+		excludeSet[id] = struct{}{}
+	}
+
+	ids := make([]uint64, 0, len(tasks))
+	for _, t := range tasks {
+		if _, excluded := excludeSet[uint64(t.ID)]; !excluded {
+			ids = append(ids, uint64(t.ID))
+		}
+	}
+	return ids, nil
 }
 
 // BulkActionPendingTasks performs operations on multiple tasks at once
@@ -144,7 +217,17 @@ func BulkActionPendingTasks(c *gin.Context) {
 		return
 	}
 
-	if len(req.TaskIDs) == 0 {
+	if req.SelectionMode != "all_filtered" && len(req.TaskIDs) == 0 {
+		c.Status(http.StatusOK)
+		return
+	}
+
+	taskIDs, err := resolvePendingIDs(req)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to resolve task selection"})
+		return
+	}
+	if len(taskIDs) == 0 {
 		c.Status(http.StatusOK)
 		return
 	}
@@ -160,14 +243,14 @@ func BulkActionPendingTasks(c *gin.Context) {
 		var maxPriority int
 		tx.Model(&models.Task{}).Where("status != ?", "processed").Select("COALESCE(MAX(priority), 0)").Scan(&maxPriority)
 		newPriority := maxPriority + 1
-		if err := tx.Model(&models.Task{}).Where("id IN ?", req.TaskIDs).Update("priority", newPriority).Error; err != nil {
+		if err := tx.Model(&models.Task{}).Where("id IN ?", taskIDs).Update("priority", newPriority).Error; err != nil {
 			tx.Rollback()
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to move tasks to top"})
 			return
 		}
 	case "move_bottom":
 		// Set to 0 priority so it goes to bottom (or lower depending on current queue).
-		if err := tx.Model(&models.Task{}).Where("id IN ?", req.TaskIDs).Update("priority", 0).Error; err != nil {
+		if err := tx.Model(&models.Task{}).Where("id IN ?", taskIDs).Update("priority", 0).Error; err != nil {
 			tx.Rollback()
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to move tasks to bottom"})
 			return
@@ -175,7 +258,7 @@ func BulkActionPendingTasks(c *gin.Context) {
 	case "remove":
 		// Find tasks to copy them to history
 		var tasks []models.Task
-		if err := tx.Where("id IN ?", req.TaskIDs).Find(&tasks).Error; err != nil {
+		if err := tx.Where("id IN ?", taskIDs).Find(&tasks).Error; err != nil {
 			tx.Rollback()
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to fetch tasks for removal"})
 			return
@@ -201,7 +284,7 @@ func BulkActionPendingTasks(c *gin.Context) {
 		}
 
 		// Delete from tasks
-		if err := tx.Where("id IN ?", req.TaskIDs).Unscoped().Delete(&models.Task{}).Error; err != nil {
+		if err := tx.Where("id IN ?", taskIDs).Unscoped().Delete(&models.Task{}).Error; err != nil {
 			tx.Rollback()
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to delete tasks"})
 			return
@@ -228,7 +311,17 @@ func BulkActionHistoryTasks(c *gin.Context) {
 		return
 	}
 
-	if len(req.TaskIDs) == 0 {
+	if req.SelectionMode != "all_filtered" && len(req.TaskIDs) == 0 {
+		c.Status(http.StatusOK)
+		return
+	}
+
+	taskIDs, err := resolveHistoryIDs(req)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to resolve task selection"})
+		return
+	}
+	if len(taskIDs) == 0 {
 		c.Status(http.StatusOK)
 		return
 	}
@@ -241,14 +334,14 @@ func BulkActionHistoryTasks(c *gin.Context) {
 
 	switch req.Action {
 	case "remove":
-		if err := tx.Where("id IN ?", req.TaskIDs).Unscoped().Delete(&models.CompletedTask{}).Error; err != nil {
+		if err := tx.Where("id IN ?", taskIDs).Unscoped().Delete(&models.CompletedTask{}).Error; err != nil {
 			tx.Rollback()
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to delete tasks"})
 			return
 		}
 	case "requeue":
 		var completedTasks []models.CompletedTask
-		if err := tx.Where("id IN ?", req.TaskIDs).Find(&completedTasks).Error; err != nil {
+		if err := tx.Where("id IN ?", taskIDs).Find(&completedTasks).Error; err != nil {
 			tx.Rollback()
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to fetch tasks for requeue"})
 			return
@@ -312,7 +405,7 @@ func BulkActionHistoryTasks(c *gin.Context) {
 		}
 
 		// Delete from completed_tasks
-		if err := tx.Where("id IN ?", req.TaskIDs).Unscoped().Delete(&models.CompletedTask{}).Error; err != nil {
+		if err := tx.Where("id IN ?", taskIDs).Unscoped().Delete(&models.CompletedTask{}).Error; err != nil {
 			tx.Rollback()
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to remove from history"})
 			return

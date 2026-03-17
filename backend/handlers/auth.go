@@ -101,7 +101,7 @@ func Login(c *gin.Context) {
 func GetSystemStatus(c *gin.Context) {
 	var count int64
 	db.DB.Model(&models.User{}).Count(&count)
-	
+
 	c.JSON(http.StatusOK, gin.H{
 		"initialized": count > 0,
 	})

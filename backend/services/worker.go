@@ -291,6 +291,11 @@ func processTask(workerName string, task models.Task) {
 		ProcessedByWorker: workerName,
 		FFmpegCommand:     ffmpegCommand,
 		Log:               logBuffer,
+		LibraryID:         &lib.ID,
+	}
+	if task.ProfileID != 0 {
+		profileID := task.ProfileID
+		completed.ProfileID = &profileID
 	}
 	db.DB.Create(&completed)
 	db.DB.Unscoped().Delete(&task)
@@ -341,19 +346,30 @@ func moveFile(sourcePath, destPath string) error {
 func handleTaskFailure(task models.Task, errorMsg string, ffmpegCommand string) {
 	summary := strings.Split(errorMsg, "\n")[0]
 	log.Printf("Task failed: %s - %s", task.Abspath, summary)
-	completed := models.CompletedTask{
-		TaskLabel:         filepath.Base(task.Abspath),
-		Abspath:           task.Abspath,
-		OriginalPath:      task.Abspath,
-		OriginalSize:      task.OriginalSize,
-		TaskSuccess:       false,
-		StartTime:         task.StartTime,
-		FinishTime:        time.Now(),
-		ProcessedByWorker: task.ProcessedByWorker,
-		FFmpegCommand:     ffmpegCommand,
-		Log:               errorMsg,
+
+	// Suppress history creation if this task's library is being deleted
+	if !GetForeman().IsLibraryDeleting(task.LibraryID) {
+		completed := models.CompletedTask{
+			TaskLabel:         filepath.Base(task.Abspath),
+			Abspath:           task.Abspath,
+			OriginalPath:      task.Abspath,
+			OriginalSize:      task.OriginalSize,
+			TaskSuccess:       false,
+			StartTime:         task.StartTime,
+			FinishTime:        time.Now(),
+			ProcessedByWorker: task.ProcessedByWorker,
+			FFmpegCommand:     ffmpegCommand,
+			Log:               errorMsg,
+			LibraryID:         nil,
+		}
+		libID := task.LibraryID
+		completed.LibraryID = &libID
+		if task.ProfileID != 0 {
+			profileID := task.ProfileID
+			completed.ProfileID = &profileID
+		}
+		db.DB.Create(&completed)
 	}
-	db.DB.Create(&completed)
 	db.DB.Unscoped().Delete(&task)
 	GetForeman().ClearWorkerStat(task.ProcessedByWorker)
 	GetHub().Publish("TASKS_UPDATE", nil)

@@ -22,7 +22,7 @@ type Hub struct {
 }
 
 var (
-	wsHub *Hub
+	wsHub  *Hub
 	wsOnce sync.Once
 )
 
@@ -61,7 +61,7 @@ func (h *Hub) Run() {
 			h.mu.Lock()
 			h.clients[conn] = true
 			h.mu.Unlock()
-			
+
 			// Send initial full state on connection
 			status := GetFullStatus()
 			msg, _ := json.Marshal(Event{Type: "FULL_STATUS", Data: status})
