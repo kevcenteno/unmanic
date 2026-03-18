@@ -19,6 +19,8 @@ type ActiveWorkerStat struct {
 	TaskID          uint      `json:"task_id"`
 	Abspath         string    `json:"abspath"`
 	StartTime       time.Time `json:"start_time"`
+	LastActivity    time.Time `json:"last_activity"`
+	LastProgress    time.Time `json:"last_progress"`
 	FFmpegCommand   string    `json:"ffmpeg_command"`
 	Percentage      float64   `json:"percentage"`
 	Elapsed         float64   `json:"elapsed"`           // seconds

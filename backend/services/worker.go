@@ -117,6 +117,8 @@ func processTask(workerName string, task models.Task) {
 		TaskID:        task.ID,
 		Abspath:       task.Abspath,
 		StartTime:     task.StartTime,
+		LastActivity:  time.Now(),
+		LastProgress:  time.Now(),
 		FFmpegCommand: ffmpegCommand,
 	}
 
@@ -191,6 +193,7 @@ func processTask(workerName string, task models.Task) {
 				}
 				logBuffer += line + "\n"
 				stat.CurrentLog = line
+				stat.LastActivity = time.Now()
 
 				if matches := timeRe.FindStringSubmatch(line); len(matches) == 4 {
 					h, _ := strconv.ParseFloat(matches[1], 64)
@@ -199,9 +202,13 @@ func processTask(workerName string, task models.Task) {
 					currentTime := (h * 3600) + (m * 60) + s
 
 					if totalDuration > 0 {
+						oldPercentage := stat.Percentage
 						stat.Percentage = (currentTime / totalDuration) * 100
 						if stat.Percentage > 100 {
 							stat.Percentage = 100
+						}
+						if stat.Percentage > oldPercentage {
+							stat.LastProgress = time.Now()
 						}
 						if speedMatches := speedRe.FindStringSubmatch(line); len(speedMatches) == 2 {
 							speed, _ := strconv.ParseFloat(speedMatches[1], 64)
@@ -223,6 +230,18 @@ func processTask(workerName string, task models.Task) {
 				if stat.IsPaused {
 					continue
 				}
+
+				now := time.Now()
+				if now.Sub(stat.LastActivity) > 2*time.Minute || now.Sub(stat.LastProgress) > 5*time.Minute {
+					logBuffer = "Hang detected: No activity for 2m or no progress for 5m.\n" + logBuffer
+					log.Printf("[%s] Hanging detected for task %s. Canceling process.", workerName, task.Abspath)
+					if cancel != nil {
+						cancel()
+					}
+					// Return to skip normal processing since we are terminating
+					continue
+				}
+
 				stat.Elapsed = time.Since(task.StartTime).Seconds() - stat.TotalPausedTime
 
 				// Get CPU/Mem if possible
